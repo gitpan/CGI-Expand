@@ -1,16 +1,47 @@
-CGI/Expand version 0.01
+CGI/Expand version 1.02
 =======================
 
-The README is used to introduce the module and provide instructions on
-how to install the module, any machine dependencies it may have (for
-example C compilers and installed libraries) and any other information
-that should be provided before the module is installed.
+NAME
+    CGI::Expand - convert flat hash to nested data using TT2's dot
+    convention
 
-A README file is required for CPAN modules since CPAN extracts the
-README file from a module distribution so that people browsing the
-archive can use it get an idea of the modules uses. It is usually a
-good idea to provide version information here so that people can
-decide whether fixes for the module are worth downloading.
+SYNOPSIS
+            use CGI::Expand;
+            use CGI; # or Apache::Request, etc.
+
+            $args = expand_cgi( CGI->new('a.0=3&a.2=4&b.c.0=x') );
+            # $args = { a => [3,undef,4], b => { c => ['x'] }, }
+
+            # Or to catch exceptions:
+            eval {  
+                    $args = expand_cgi( CGI->new('a.0=3&a.2=4&b.c.0=x') );
+            } or log_and_exit( $@ );
+
+            #-----
+            use CGI::Expand qw(expand_hash);
+
+            $args = expand_hash({'a.0'=>77}); # $args = { a => [ 77 ] }
+
+DESCRIPTION
+    Converts a CGI query into structured data using a dotted name convention
+    similar to TT2.
+
+    "expand_cgi" works with CGI.pm, Apache::Request or anything with an
+    appropriate "param" method. Or you can use "expand_hash" directly.
+
+Motivation
+    The Common Gateway Interface restricts parameters to name=value pairs,
+    but often we'd like to use more structured data. This module uses a name
+    encoding convention to rebuild a hash of hashes, arrays and values.
+    Arrays can either be ordered, or from CGI's multi-valued parameter
+    handling.
+
+    The generic nature of this process means that the core components of
+    your system can remain CGI ignorant and operate on structured data.
+    Better for modularity, better for testing.
+
+    (This problem has appeared a few times in other forums, "SEE ALSO")
+
 
 INSTALLATION
 

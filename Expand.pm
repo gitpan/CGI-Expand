@@ -1,5 +1,5 @@
 package CGI::Expand;
-$VERSION = 1.01;
+$VERSION = 1.02;
 # $Revision: 1.2 $ $Date: 2004/01/08 11:41:57 $
 
 require Exporter;
