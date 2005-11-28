@@ -1,7 +1,7 @@
 #!/usr/bin/perl -w
 
 use strict;
-use Test::More tests => 39;
+use Test::More tests => 40;
 use Test::Exception;
 
 BEGIN { use_ok( 'CGI::Expand' ); }
@@ -18,6 +18,10 @@ my $deep = {
 };
 
 is_deeply( CGI::Expand::expand_hash($flat), $deep, 'expand_hash');
+is_deeply( CGI::Expand::collapse_hash($deep), $flat, 'collapse_hash');
+use Data::Dumper;
+diag Dumper(CGI::Expand::collapse_hash($deep));
+diag Dumper($flat);
 
 sub Fake::param {
     shift;
@@ -28,7 +32,7 @@ sub Fake::param {
 # only uses param interface
 is_deeply( expand_cgi(bless []=>'Fake'), $deep, 'param interface');
 
-CGI::Expand->import('expand_hash');
+CGI::Expand->import('expand_hash','collapse_hash');
 is_deeply( expand_hash($flat), $deep, 'import');
 
 isa_ok(expand_hash({1,2}), 'HASH');
@@ -40,7 +44,7 @@ $array_99[99] = 1;
 
 is_deeply(expand_hash({'a.99',1}), {a=>\@array_99}, ' < 100 array' );
 throws_ok { expand_hash({'a.100',1}) } qr/^CGI param array limit exceeded/;
-is_deeply(expand_hash({'a.\100',1}), {a=>{100=>1}}, ' \100 hash' );
+is_deeply(expand_hash({'a.\\100',1}), {a=>{100=>1}}, ' \100 hash' );
 
 {
     # Limit adjustable
@@ -78,9 +82,11 @@ is_deeply(expand_hash({''=>1}), {''=>1}, 'empty key' );
 
 
 SKIP: {
-    skip "No CGI module", 9 unless eval 'use CGI; 1';
+    skip "No CGI module", 10 unless eval 'use CGI; 1';
 
     is_deeply( expand_cgi(CGI->new($query)), $deep, 'expand_cgi');
+    is_deeply( expand_cgi(CGI->new("$query&c.x=20&c.y=30")), $deep, 
+                                        'expand_cgi ignores .x .y');
 
     ok(eq_set( ( expand_cgi(CGI->new('a=1&a=2')) )->{a}, [2, 1]), 
                                                     'cgi multivals');

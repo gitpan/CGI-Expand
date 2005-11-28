@@ -1,17 +1,23 @@
 package CGI::Expand;
-$VERSION = 1.02;
-# $Revision: 1.2 $ $Date: 2004/01/08 11:41:57 $
+$VERSION = 1.03;
+# $Revision: 1.4 $ $Date: 2005/08/15 01:22:43 $
 
 require Exporter;
 @ISA = ('Exporter');
 @EXPORT = qw(expand_cgi);
-@EXPORT_OK = qw(expand_hash);
+@EXPORT_OK = qw(expand_hash collapse_hash);
 
 use strict;
 use warnings;
 use Carp qw(croak);
+use vars qw($Max_Array $Separator);
 
 $CGI::Expand::Max_Array ||= 100; # limit array size
+$CGI::Expand::Separator ||= '.'; # separator char
+
+sub _hex_sep {
+    return sprintf '\x%x', ord($Separator); # non-meta interpolation version
+}
 
 sub expand_cgi {
     my $cgi = shift; # CGI or Apache::Request
@@ -19,6 +25,7 @@ sub expand_cgi {
 
     # permit multiple values CGI style
     for ($cgi->param) {
+        next if (/\.[xy]$/); # img_submit=val & img_submit.x=20 -> clash
         my @vals = $cgi->param($_);
         $args{$_} = @vals > 1 ? \@vals : $vals[0];
     }
@@ -31,19 +38,23 @@ sub expand_cgi {
 sub expand_hash {
     my $flat = shift;
     my $deep = {};
+    my $s = _hex_sep();
+
     for my $name (keys %$flat) {
 
         # These next two regexes are the escaping aware equivalent
         # to the following:
         # my ($first, @segments) = split(/\./, $name, -1);
 
-        # m// splits on unescaped '.' chars
-        $name =~ m/^ ( [^\\.]* (?: \\(?:.|$) [^\\.]* )* ) /gx; # can't fail
+        # m// splits on unescaped '.' chars. Can't fail b/c \G on next
+        # non ./ * -> escaped anything -> non ./ *
+        $name =~ m/^ ( [^\\$s]* (?: \\(?:.|$) [^\\$s]* )* ) /gx;
         my $first = $1;
         $first =~ s/\\(.)/$1/g; # remove escaping
 
-        my (@segments) = 
-                $name =~ m/\G (?:\.) ( [^\\.]* (?: \\(?:.|$) [^\\.]* )* ) /gx;
+        my (@segments) = $name =~ 
+            # . -> ( non ./ * -> escaped anything -> non ./ * )
+            m/\G (?:$s) ( [^\\$s]* (?: \\(?:.|$) [^\\$s]* )* ) /gx;
 
         my $box_ref = \$deep->{$first};
         for (@segments) {
@@ -67,6 +78,47 @@ sub expand_hash {
         $$box_ref = $flat->{$name};
     }
     return $deep;
+}
+
+{
+
+my $s;
+
+sub collapse_hash {
+    my $deep = shift;
+    my $flat = {};
+    $s = _hex_sep(); # update once only
+    _collapse_hash($deep, $flat, () );
+    return $flat;
+}
+
+sub _collapse_hash {
+    my $deep = shift;
+    my $flat = shift;
+    # @_ is now segments
+
+    if(! ref $deep) {
+        my $name = join $Separator, @_;
+        $flat->{$name} = $deep;
+    } elsif(ref $deep eq 'HASH') {
+        for (keys %$deep) {
+            # escape \ and . (once only, at this level)
+            (my $name = $_ ) =~ s/([\\$s])/\\$1/g;
+            # may be join too
+            _collapse_hash($deep->{$_}, $flat, @_, $name);
+        }
+    } elsif(ref $deep eq 'ARRAY') {
+        croak "CGI param array limit exceeded $#$deep for ",join $Separator,@_
+                    if($#$deep+1 >= $CGI::Expand::Max_Array);
+
+        for (0 .. $#$deep) {
+            _collapse_hash($deep->[$_], $flat, @_, $_) if defined $deep->[$_];
+        }
+    } else {
+        croak "Unknown reference type for ",join($Separator,@_),":",ref $deep;
+    }
+}
+
 }
 
 1;
@@ -219,12 +271,17 @@ are reported as exceptions.  (See test.pl for for examples)
 
 =back
 
+=head1 LIMITATIONS
+
+The top level is always a hash.  Consequently, any digit only names
+will be keys in this hash rather than array indices.
+
+Image inputs with name.x, name.y coordinates cause a clash.
+
 =head1 TODO 
 
-It may be useful to provide the inverse process, to convert
-a data structure back to a query string, CGI object or
-set of hidden form fields.  (I do my persistence server-side
-and html with TT2 so this hasn't yet come up)
+Allow another character as separator (not just '.')
+in case they want to use JS.
 
 Another, potentially useful option would be to remove empty
 parameters.  (I think I'll leave this to another tool..)
@@ -233,10 +290,8 @@ Glob style parameters (with SCALAR, ARRAY and HASH slots)
 would resolve the type clashes.  I suspect it would be ungainly
 and memory hungry to use.
 
-=head1 LIMITATIONS
-
-The top level is always a hash.  Consequently, any digit only names
-will be keys in this hash rather than array indices.
+Look at using L<Template::Plugin::StringTree> to avoid path clashes
+(eg .x)
 
 =head1 SEE ALSO
 
@@ -250,6 +305,14 @@ L<HTTP::Rollup> - Replaces CGI.pm completely, no list ordering.
 
 L<CGI::State> - Tied to CGI.pm, unclear error checking, 
 has the inverse conversion.
+
+=item *
+
+L<Template::Plugin::StringTree>
+
+=item *
+
+L<Hash::Flatten> - Pick your delimiters
 
 =item *
 

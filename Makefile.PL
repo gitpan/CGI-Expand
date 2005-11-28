@@ -22,3 +22,19 @@ WriteMakefile(
                     )" },
 
 );
+
+# Appended to the end of the Makefile
+sub MY::postamble {
+    return <<'POSTAMBLE';
+DEBVNAME = $(shell $(PERLRUN) -le 'print lc(shift)' $(DISTVNAME))
+deb : debdir
+    -cd $(DEBVNAME) && debuild -us -uc
+
+debdir : distdir
+    $(RM_RF) $(DEBVNAME)
+    $(MV) $(DISTVNAME) $(DEBVNAME)
+    $(CP) -r debian $(DEBVNAME)
+
+POSTAMBLE
+}   
+

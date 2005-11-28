@@ -5,3 +5,6 @@ Revision history for Perl extension CGI::Expand.
 
 1.02 Thu Jan  8 23:00:56 EST 2004
     - Fixed bad README
+
+1.03 Mon Jan 12 14:38:47 EST 2004
+    - Ignore /.[xy]$/ cgi parameters for image submits
