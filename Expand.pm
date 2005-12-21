@@ -1,25 +1,62 @@
 package CGI::Expand;
-$VERSION = 1.03;
-# $Revision: 1.4 $ $Date: 2005/08/15 01:22:43 $
-
-require Exporter;
-@ISA = ('Exporter');
-@EXPORT = qw(expand_cgi);
-@EXPORT_OK = qw(expand_hash collapse_hash);
-
+$VERSION = '1.06';
 use strict;
 use warnings;
-use Carp qw(croak);
-use vars qw($Max_Array $Separator);
 
-$CGI::Expand::Max_Array ||= 100; # limit array size
-$CGI::Expand::Separator ||= '.'; # separator char
+# NOTE: Exporter is not actually used
+our @EXPORT = qw(expand_cgi);
+our @EXPORT_OK = qw(expand_hash collapse_hash);
+my %is_exported = map { $_ => 1 } @EXPORT, @EXPORT_OK;
 
-sub _hex_sep {
-    return sprintf '\x%x', ord($Separator); # non-meta interpolation version
+use Carp qw(croak carp);
+
+sub import {
+    my $from_pkg = shift;
+    my $to_pkg = caller;
+
+    if(@_) {
+        for my $sub (@_) {
+            croak "Can't export symbol $sub" unless $is_exported{$sub};
+        }
+    } else {
+        @_ = @EXPORT;
+    }
+
+    _export_curried($from_pkg, $to_pkg, @_);
+}
+
+sub _export_curried {
+    my $from_pkg = shift;
+    my $to_pkg   = shift;
+
+    no strict 'refs';
+    for my $sub (@_) {
+        # export requested subs with class arg curried
+        *{$to_pkg.'::'.$sub} = sub { $from_pkg->$sub(@_) };
+        # get inherited implementation with interface backward compatibility
+    }
+}
+
+sub separator { 
+    if( defined $CGI::Expand::Separator ) {
+        carp '$CGI::Expand::Separator is deprecated'
+                        unless $CGI::Expand::BackCompat;
+        return $CGI::Expand::Separator;
+    }
+    return '.';
+}
+
+sub max_array { 
+    if( defined $CGI::Expand::Max_Array ) {
+        carp '$CGI::Expand::Max_Array is deprecated'
+                        unless $CGI::Expand::BackCompat;
+        return $CGI::Expand::Max_Array;
+    }
+    return 100;
 }
 
 sub expand_cgi {
+    my $class = shift;
     my $cgi = shift; # CGI or Apache::Request
     my %args;
 
@@ -29,49 +66,59 @@ sub expand_cgi {
         my @vals = $cgi->param($_);
         $args{$_} = @vals > 1 ? \@vals : $vals[0];
     }
-    return expand_hash(\%args);
+    return $class->expand_hash(\%args);
 }
 
-# Convert from { 'a.0' => 3, 'a.2' => 4, 'b.c.0' => "x", c => [2, 3], d => }
-# args {'a' => ['3',undef,'4'],'b' => {'c' => ['x']},'c' => ['2','3'],'d' => ''}
-# first segment is alway treated as a hash key
+sub split_name {
+    my $class = shift;
+    my $name  = shift;
+    my $sep = $class->separator();
+    $sep = "\Q$sep";
+
+    # These next two regexes are the escaping aware equivalent
+    # to the following:
+    # my ($first, @segments) = split(/\./, $name, -1);
+
+    # m// splits on unescaped '.' chars. Can't fail b/c \G on next
+    # non ./ * -> escaped anything -> non ./ *
+    $name =~ m/^ ( [^\\$sep]* (?: \\(?:.|$) [^\\$sep]* )* ) /gx;
+    my $first = $1;
+    $first =~ s/\\(.)/$1/g; # remove escaping
+
+    my (@segments) = $name =~ 
+        # . -> ( non ./ * -> escaped anything -> non ./ * )
+        m/\G (?:[$sep]) ( [^\\$sep]* (?: \\(?:.|$) [^\\$sep]* )* ) /gx;
+    # Escapes removed later, can be used to avoid using as array index
+
+    return ($first, @segments);
+}
+
 sub expand_hash {
+    my $class = shift;
     my $flat = shift;
     my $deep = {};
-    my $s = _hex_sep();
+    my $sep = $class->separator;
 
     for my $name (keys %$flat) {
 
-        # These next two regexes are the escaping aware equivalent
-        # to the following:
-        # my ($first, @segments) = split(/\./, $name, -1);
-
-        # m// splits on unescaped '.' chars. Can't fail b/c \G on next
-        # non ./ * -> escaped anything -> non ./ *
-        $name =~ m/^ ( [^\\$s]* (?: \\(?:.|$) [^\\$s]* )* ) /gx;
-        my $first = $1;
-        $first =~ s/\\(.)/$1/g; # remove escaping
-
-        my (@segments) = $name =~ 
-            # . -> ( non ./ * -> escaped anything -> non ./ * )
-            m/\G (?:$s) ( [^\\$s]* (?: \\(?:.|$) [^\\$s]* )* ) /gx;
+        my ($first, @segments) = $class->split_name($name);
 
         my $box_ref = \$deep->{$first};
         for (@segments) {
-            if(/^(0|[1-9]\d*)$/) { 
+            if($class->max_array && /^(0|[1-9]\d*)$/) { 
                 croak "CGI param array limit exceeded $1 for $name=$_"
-                    if($1 >= $CGI::Expand::Max_Array);
+                    if($1 >= $class->max_array);
                 $$box_ref = [] unless defined $$box_ref;
                 croak "CGI param clash for $name=$_" 
                     unless ref $$box_ref eq 'ARRAY';
                 $box_ref = \($$box_ref->[$1]);
             } else { 
-                s/\\(.)/$1/g; # remove escaping
+                s/\\(.)/$1/g if $sep; # remove escaping
                 $$box_ref = {} unless defined $$box_ref;
                 croak "CGI param clash for $name=$_"
                     unless ref $$box_ref eq 'HASH';
                 $box_ref = \($$box_ref->{$_});
-            }    
+            }   
         }
         croak "CGI param clash for $name value $flat->{$name}" 
             if defined $$box_ref;
@@ -82,40 +129,51 @@ sub expand_hash {
 
 {
 
-my $s;
-
 sub collapse_hash {
-    my $deep = shift;
-    my $flat = {};
-    $s = _hex_sep(); # update once only
-    _collapse_hash($deep, $flat, () );
+    my $class = shift;
+    my $deep  = shift;
+    my $flat  = {};
+
+    $class->_collapse_hash($deep, $flat, () );
     return $flat;
 }
 
+sub join_name {
+    my $class = shift;
+    my $sep = substr($class->separator, 0, 1);
+    return join $sep, @_;
+}
+
 sub _collapse_hash {
-    my $deep = shift;
-    my $flat = shift;
+    my $class  = shift;
+    my $deep  = shift;
+    my $flat  = shift;
     # @_ is now segments
 
     if(! ref $deep) {
-        my $name = join $Separator, @_;
+        my $name = $class->join_name(@_);
         $flat->{$name} = $deep;
     } elsif(ref $deep eq 'HASH') {
         for (keys %$deep) {
-            # escape \ and . (once only, at this level)
-            (my $name = $_ ) =~ s/([\\$s])/\\$1/g;
-            # may be join too
-            _collapse_hash($deep->{$_}, $flat, @_, $name);
+            # escape \ and separator chars (once only, at this level)
+            my $name = $_;
+            if (defined (my $sep = $class->separator)) {
+                $sep = "\Q$sep";
+                $name =~ s/([\\$sep])/\\$1/g 
+            }
+            $class->_collapse_hash($deep->{$_}, $flat, @_, $name);
         }
     } elsif(ref $deep eq 'ARRAY') {
-        croak "CGI param array limit exceeded $#$deep for ",join $Separator,@_
-                    if($#$deep+1 >= $CGI::Expand::Max_Array);
+        croak "CGI param array limit exceeded $#$deep for ",
+                                            $class->join_name(@_)
+                    if($#$deep+1 >= $class->max_array);
 
         for (0 .. $#$deep) {
-            _collapse_hash($deep->[$_], $flat, @_, $_) if defined $deep->[$_];
+            $class->_collapse_hash($deep->[$_], $flat, @_, $_) 
+                                                if defined $deep->[$_];
         }
     } else {
-        croak "Unknown reference type for ",join($Separator,@_),":",ref $deep;
+        croak "Unknown reference type for ",$class->join_name(@_),":",ref $deep;
     }
 }
 
@@ -156,19 +214,20 @@ convention similar to TT2.
 C<expand_cgi> works with CGI.pm, Apache::Request or anything with an
 appropriate "param" method.  Or you can use C<expand_hash> directly.
 
+If you prefer to use a different flattening convention then CGI::Expand
+can be subclassed.
+
 =head1 Motivation
 
 The Common Gateway Interface restricts parameters to name=value pairs,
 but often we'd like to use more structured data.  This module
 uses a name encoding convention to rebuild a hash of hashes, arrays
-and values.  Arrays can either be ordered, or from CGI's multi-valued
-parameter handling.
+and values.  Arrays can either be indexed explicitly or from CGI's 
+multi-valued parameter handling.
 
 The generic nature of this process means that the core components
 of your system can remain CGI ignorant and operate on structured data.
 Better for modularity, better for testing.
-
-(This problem has appeared a few times in other forums, L<"SEE ALSO">)
 
 =head1 DOT CONVENTION
 
@@ -183,8 +242,9 @@ subsequent segments may be keys in sub-hashes or
 indices in sub-arrays.  Integer segments are treated
 as array indices, others as hash keys.
 
-Array size is limited by $CGI::Expand::Max_Array,
-100 by default.
+Array size is limited to 100 by default.  The limit can be altered
+by subclassing or using the deprecated $Max_Array package variable.
+See below.
 
 The backslash '\' escapes the next character in cgi parameter names
 allowing '.' , '\' and digits in hash keys.  The escaping
@@ -209,13 +269,13 @@ allowing '.' , '\' and digits in hash keys.  The escaping
 
 =head1 EXPORTS
 
-C<expand_cgi> by default, C<expand_hash> upon request.
+C<expand_cgi> by default, C<expand_hash> and C<collapse_hash> upon request.
 
 =head1 FUNCTIONS
 
 =over 4
 
-=item C< $args = expand_cgi ( $CGI_object_or_similer ) >
+=item C< $deep_hash = expand_cgi ( $CGI_object_or_similar ) >
 
 Takes a CGI object and returns a hashref for the expanded
 data structure (or dies, see L<"EXCEPTIONS">).
@@ -233,20 +293,28 @@ will have an undefined ordering).
 
     # result:
     # $args = {
-    #    a => [3,undef,4],
-    #    b => { c => ['x'] },
-    #    c => ['2','3'],
-    #    d => '',
-    #    e => ['1','2'], # order depends on CGI/etc
+    #   a => [3,undef,4],
+    #   b => { c => ['x'] },
+    #   c => ['2','3'],
+    #   d => '',
+    #   e => ['1','2'], # order depends on CGI/etc
     # };
 
-=item C< $args = expand_hash ( $hashref ) >
+=item C< $deep_hash = expand_hash ( $flat_hash ) >
 
 Expands the keys of the parameter hash according
 to the dot convention (or dies, see L<"EXCEPTIONS">).
 
-    $args = expand_hash({ 'a.b.1' = [1,2] });
+    $args = expand_hash({ 'a.b.1' => [1,2] });
     # $args = { a => { b => [undef, [1,2] ] } }
+
+=item C< $flat_hash = collapse_hash ( $deep_hash ) >
+
+The inverse of expand_hash.  Converts the $deep_hash data structure
+back into a flat hash.
+
+    $flat = collapse_hash({ a => { b => [undef, [1,2] ] } });
+    # $flat = { 'a.b.1.0' => 1, 'a.b.1.1' => 2 }
 
 =back
 
@@ -260,7 +328,7 @@ the process die).
 
 =item "CGI param array limit exceeded..."
 
-If an array index exceeds $CGI::Expand::Max_Array (default: 100)
+If an array index exceeds the array limit (default: 100)
 then an exception is thrown.  
 
 =item "CGI param clash for..."
@@ -271,27 +339,69 @@ are reported as exceptions.  (See test.pl for for examples)
 
 =back
 
+=head1 SUBCLASSING
+
+Subclassing in now the preferred way to change the behaviour and
+defaults.  (Previously package variables were used, see test.pl).
+
+The methods which may be overriden by subclasses are separator,
+max_array, split_name and join_name.
+
+=over 4
+
+=item $subclass->max_array()
+
+The limit for the array size, defaults to 100.  The value 0 can be
+used to disable the use of arrays, everthing is a hash key.
+
+=item $subclass->separator()
+
+Returns the separator charaters used to split the keys of the flat hash.
+The default is '.' but multiple characters are allowed.  The default
+join will use the first character.
+
+If there is no separator then '\' escaping does not occur.
+This is for use with split_name and join_name below.
+
+=item @segments = $subclass->split_name($name)
+
+The split_name method must break $name in to key segments for the
+nested data structure.  The default version just splits on the
+separator characters with a bit of fiddling to handle escaping.
+
+=item $name = $subclass->join_name(@segments)
+
+The inverse of split_name, joins the segments back to the key for
+the flat hash.  The default version uses the first character of the
+string returned by the separator method.
+
+=back
+
+=head1 DEPRECATIONS
+
+$CGI::Expand::Separator and $CGI::Expand::Max_Array are deprecated.
+They still work for now but emit a warning (supressed with 
+$CGI::Expand::BackCompat = 1)
+
+Using the functions by their fully qualified names ceased to work
+at around version 1.04.  They're now class methods so just replace
+the last :: with ->.
+
 =head1 LIMITATIONS
 
 The top level is always a hash.  Consequently, any digit only names
 will be keys in this hash rather than array indices.
 
-Image inputs with name.x, name.y coordinates cause a clash.
+Image inputs with name.x, name.y coordinates are ignored as they 
+will class with the value for name.
 
 =head1 TODO 
 
-Allow another character as separator (not just '.')
-in case they want to use JS.
-
-Another, potentially useful option would be to remove empty
-parameters.  (I think I'll leave this to another tool..)
+Thing about ways to keep $cgi and the expanded version in sync
 
 Glob style parameters (with SCALAR, ARRAY and HASH slots)
-would resolve the type clashes.  I suspect it would be ungainly
-and memory hungry to use.
-
+would resolve the type clashes, probably no fun to use.
 Look at using L<Template::Plugin::StringTree> to avoid path clashes
-(eg .x)
 
 =head1 SEE ALSO
 
@@ -303,8 +413,7 @@ L<HTTP::Rollup> - Replaces CGI.pm completely, no list ordering.
 
 =item *
 
-L<CGI::State> - Tied to CGI.pm, unclear error checking, 
-has the inverse conversion.
+L<CGI::State> - Tied to CGI.pm, unclear error checking
 
 =item *
 
