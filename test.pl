@@ -8,13 +8,13 @@ BEGIN { use_ok( 'CGI::Expand' ); }
 
 my $query = 'a.0=3&a.2=4&b.c.0=x&c.0=2&c.1=3&d=';
 my $flat = {
-    'a.0' => 3, 'a.2' => 4, 'b.c.0' => "x", 'c.0' => 2, 'c.1' => 3, d => '',
+	'a.0' => 3, 'a.2' => 4, 'b.c.0' => "x", 'c.0' => 2, 'c.1' => 3, d => '',
 };
 my $deep = {
-    a => [3,undef,4],
-    b => { c => ['x'] },
-    c => ['2','3'],
-    d => '',
+	a => [3,undef,4],
+	b => { c => ['x'] },
+	c => ['2','3'],
+	d => '',
 };
 my $pipe_flat = {
     'a|0' => 3, 'a|2' => 4, 'b|c|0' => "x", 'c|0' => 2, 'c|1' => 3, d => '',
@@ -31,9 +31,9 @@ my $deep_hash_only = {
 #diag Dumper($flat);
 
 sub Fake::param {
-    shift;
-    return keys %$flat unless @_;
-    return $flat->{$_[0]};
+	shift;
+	return keys %$flat unless @_;
+	return $flat->{$_[0]};
 }
 
 # only uses param interface
@@ -55,22 +55,22 @@ throws_ok { expand_hash({'a.100',1}) } qr/^CGI param array limit exceeded/;
 is_deeply(expand_hash({'a.\\100',1}), {a=>{100=>1}}, ' \100 hash' );
 
 {
-    # Limit adjustable
-    local $CGI::Expand::Max_Array = 200;
-    local $CGI::Expand::BackCompat = 1;
-    my @array_199;
-    $array_199[199] = 1;
+	# Limit adjustable
+	local $CGI::Expand::Max_Array = 200;
+	local $CGI::Expand::BackCompat = 1;
+	my @array_199;
+	$array_199[199] = 1;
 
-    is_deeply(expand_hash({'a.199',1}), {a=>\@array_199}, ' < 200 array' );
-    throws_ok { expand_hash({'a.200',1}) } qr/^CGI param array limit exceeded/;
-    is_deeply(expand_hash({'a.\200',1}), {a=>{200=>1}}, ' \200 hash' );
+	is_deeply(expand_hash({'a.199',1}), {a=>\@array_199}, ' < 200 array' );
+	throws_ok { expand_hash({'a.200',1}) } qr/^CGI param array limit exceeded/;
+	is_deeply(expand_hash({'a.\200',1}), {a=>{200=>1}}, ' \200 hash' );
 }
 
 throws_ok { expand_hash($_) } qr/^CGI param clash/
-    for (   {'a.1',1,'a.b',1},
-            {'a.1',1,'a',1},
-            {'a.b',1,'a',1},
-        );
+	for (   {'a.1',1,'a.b',1},
+			{'a.1',1,'a',1},
+			{'a.b',1,'a',1},
+		);
 
 # escaping and weird cases
 my $ds = "\\\\";
@@ -91,31 +91,31 @@ is_deeply(expand_hash({''=>1}), {''=>1}, 'empty key' );
 
 
 SKIP: {
-    skip "No CGI module", 10 unless eval 'use CGI; 1';
+	skip "No CGI module", 10 unless eval 'use CGI; 1';
 
-    is_deeply( expand_cgi(CGI->new($query)), $deep, 'expand_cgi');
-    is_deeply( expand_cgi(CGI->new("$query&c.x=20&c.y=30")), $deep, 
-                                        'expand_cgi ignores .x .y');
+	is_deeply( expand_cgi(CGI->new($query)), $deep, 'expand_cgi');
+	is_deeply( expand_cgi(CGI->new("$query&c.x=20&c.y=30")), $deep, 
+										'expand_cgi ignores .x .y');
 
-    ok(eq_set( ( expand_cgi(CGI->new('a=1&a=2')) )->{a}, [2, 1]), 
-                                                    'cgi multivals');
+	ok(eq_set( ( expand_cgi(CGI->new('a=1&a=2')) )->{a}, [2, 1]), 
+													'cgi multivals');
 
-    throws_ok { expand_cgi(CGI->new($_)) } qr/^CGI param clash/
-        for (  
-            'a.0=3&a.c=4',
-            'a.c=3&a.0=4',
-            'a.0=3&a=b',
-            'a.a=3&a=b',
-            'a=3&a.0=b',
-            'a=3&a.a=b',
-            'a=3&a=4&a.b=1',
-        );
+	throws_ok { expand_cgi(CGI->new($_)) } qr/^CGI param clash/
+		for (  
+			'a.0=3&a.c=4',
+			'a.c=3&a.0=4',
+			'a.0=3&a=b',
+			'a.a=3&a=b',
+			'a=3&a.0=b',
+			'a=3&a.a=b',
+			'a=3&a=4&a.b=1',
+		);
 }
 
 {
     # Disable Array, treat everything as a hash
     local $CGI::Expand::Max_Array = 0;
-    local $CGI::Expand::BackCompat = 1;
+	local $CGI::Expand::BackCompat = 1;
     # $flat from above
 
     is_deeply( expand_hash($flat), $deep_hash_only, 'expand hash only');
@@ -125,7 +125,7 @@ SKIP: {
 }
 {
     local $CGI::Expand::Separator = '|'; # Another regex metacharacter
-    local $CGI::Expand::BackCompat = 1;
+	local $CGI::Expand::BackCompat = 1;
 
     is_deeply( CGI::Expand->expand_hash($pipe_flat), $deep, 
                                         'expand sep | with class method');
