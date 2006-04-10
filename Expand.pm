@@ -1,5 +1,5 @@
 package CGI::Expand;
-$VERSION = '2.01';
+$VERSION = '2.02';
 use strict;
 use warnings;
 

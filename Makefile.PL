@@ -1,6 +1,11 @@
 use ExtUtils::MakeMaker;
 # See lib/ExtUtils/MakeMaker.pm for details of how to influence
 # the contents of the Makefile that is written.
+
+BEGIN { 
+    *MY::postamble = \&postamble if $^O =~ /^linux/i;
+}
+
 WriteMakefile(
     'NAME'		=> 'CGI::Expand',
     'VERSION_FROM'	=> 'Expand.pm', # finds $VERSION
@@ -15,8 +20,8 @@ WriteMakefile(
 
 );
 
-# Appended to the end of the Makefile
-sub MY::postamble {
+# Appended to the end of the Makefile for linux (debian) only
+sub postamble {
     return <<'POSTAMBLE';
 DEBVNAME = $(shell $(PERLRUN) -le 'print lc(shift)' $(DISTVNAME))
 deb : debdir

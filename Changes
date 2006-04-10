@@ -20,3 +20,6 @@ Revision history for Perl extension CGI::Expand.
 2.01 Wed Jan 18 12:53:27 CET 2006
     - Avoid expanding tabs in Makefile.PL (RT#17125)
     - Bump major version as 1.06 was quite different to 1.03
+
+2.02 Mon Apr 10 15:02:26 CEST 2006
+    - Only write Makefile postamble on linux (caused trouble under Windows)
